@@ -1,7 +1,7 @@
 from picamera.array import PiRGBArray
 from picamera import PiCamera
 import time
-import cv2
+import cv2 
 import numpy as np
 import logging
 
@@ -45,10 +45,12 @@ def average_slope_intercept(frame, line_segments):
     If all line slopes are > 0: then we only have detected right lane
     """
     lane_lines = []
+    height, width, _ = frame.shape
+
     if line_segments is None:
         logging.info('No line_segment segments detected')
         return lane_lines
-    height, width, _ = frame.shape
+    
     left_fit = []
     right_fit = []
 
@@ -92,16 +94,9 @@ def make_points(frame, line):
     # bound the coordinates within the frame
     x1 = max(-width, min(2 * width, int((y1 - intercept) / slope)))
     x2 = max(-width, min(2 * width, int((y2 - intercept) / slope)))
+    print(x1, y1, x2, y2)
     return [[x1, y1, x2, y2]]
 
-def detect_lane(frame):
-    
-    edges = detect_edges(frame)
-    cropped_edges = region_of_interest(edges)
-    line_segments = detect_line_segments(cropped_edges)
-    lane_lines = average_slope_intercept(frame, line_segments)
-    
-    return lane_lines
 
 def display_lines(frame, lines, line_color=(0, 255, 0), line_width=2):
     line_image = np.zeros_like(frame)
@@ -112,9 +107,7 @@ def display_lines(frame, lines, line_color=(0, 255, 0), line_width=2):
     line_image = cv2.addWeighted(frame, 0.8, line_image, 1, 1)
     return line_image
 
-
-
-
+ 
 camera = PiCamera()
 camera.resolution = (640, 480)
 camera.framerate = 32
@@ -123,17 +116,15 @@ rawCapture = PiRGBArray(camera, size=(640, 480))
 time.sleep(0.1)
 
 for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
-    if frame is None:
-        break
-    
-    edges = detect_edges(frame.array)
+    frame = frame.array
+    edges = detect_edges(frame)
+    height, width = edges.shape
     cropped_edges = region_of_interest(edges)
     line_segments = detect_line_segments(cropped_edges)
-    lane_lines = average_slope_intercept(frame.array, line_segments)
-    
-    lane_lines_image = display_lines(frame.array, lane_lines)
-    
+    lane_lines = average_slope_intercept(frame, line_segments)
+    lane_lines_image = display_lines(frame, lane_lines)
     cv2.imshow("lane lines", lane_lines_image)
+        
     
     key = cv2.waitKey(1) & 0xFF
     
