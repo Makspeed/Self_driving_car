@@ -5,15 +5,15 @@ import cv2
 import numpy as np
 import logging
 
-def detect_edges(frame):
+def canny(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
-    edges = cv2.Canny(blur, 100, 200)
-    return edges
+    canny = cv2.Canny(blur, 100, 200)
+    return canny
 
-def region_of_interest(edges):
-    height, width = edges.shape
-    mask = np.zeros_like(edges)
+def region_of_interest(canny):
+    height, width = canny.shape
+    mask = np.zeros_like(canny)
     
     polygon = np.array([[
         (0, height * 1 // 2),
@@ -23,17 +23,17 @@ def region_of_interest(edges):
     ]], np.int32)
     
     cv2.fillPoly(mask, polygon, 255)
-    cropped_edges = cv2.bitwise_and(edges, mask)
+    masked_image = cv2.bitwise_and(canny, mask)
     
-    return cropped_edges
+    return masked_image
 
 
-def detect_line_segments(cropped_edges):
+def detect_line_segments(masked_image):
     # tuning min_threshold, minLineLength, maxLineGap is a trial and error process by hand
     rho = 1  # distance precision in pixel, i.e. 1 pixel
     angle = np.pi / 180  # angular precision in radian, i.e. 1 degree
     min_threshold = 10  # minimal of votes
-    line_segments = cv2.HoughLinesP(cropped_edges, rho, angle, min_threshold, np.array([]), minLineLength=8, maxLineGap=4)
+    line_segments = cv2.HoughLinesP(masked_image, rho, angle, min_threshold, np.array([]), minLineLength=8, maxLineGap=4)
 
     return line_segments
 
@@ -98,7 +98,7 @@ def make_points(frame, line):
     return [[x1, y1, x2, y2]]
 
 
-def display_lines(frame, lines, line_color=(0, 255, 0), line_width=2):
+def display_lines(frame, lines, line_color=(0, 255, 0), line_width=4):
     line_image = np.zeros_like(frame)
     if lines is not None:
         for line in lines:
@@ -107,20 +107,19 @@ def display_lines(frame, lines, line_color=(0, 255, 0), line_width=2):
     line_image = cv2.addWeighted(frame, 0.8, line_image, 1, 1)
     return line_image
 
- 
+
 camera = PiCamera()
 camera.resolution = (640, 480)
 camera.framerate = 32
-
 rawCapture = PiRGBArray(camera, size=(640, 480))
 time.sleep(0.1)
 
 for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
     frame = frame.array
-    edges = detect_edges(frame)
+    edges = canny(frame)
     height, width = edges.shape
-    cropped_edges = region_of_interest(edges)
-    line_segments = detect_line_segments(cropped_edges)
+    masked_image = region_of_interest(edges)
+    line_segments = detect_line_segments(masked_image)
     lane_lines = average_slope_intercept(frame, line_segments)
     lane_lines_image = display_lines(frame, lane_lines)
     cv2.imshow("lane lines", lane_lines_image)
