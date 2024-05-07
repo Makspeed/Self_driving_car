@@ -30,7 +30,7 @@ def region_of_interest(canny):
 
 def detect_line_segments(masked_image):
     # tuning min_threshold, minLineLength, maxLineGap is a trial and error process by hand
-    rho = 1  # distance precision in pixel, i.e. 1 pixel
+    rho = 2  # distance precision in pixel, i.e. 1 pixel
     angle = np.pi / 180  # angular precision in radian, i.e. 1 degree
     min_threshold = 10  # minimal of votes
     line_segments = cv2.HoughLinesP(masked_image, rho, angle, min_threshold, np.array([]), minLineLength=8, maxLineGap=4)
@@ -60,7 +60,8 @@ def average_slope_intercept(frame, line_segments):
 
     for line_segment in line_segments:
         for x1, y1, x2, y2 in line_segment:
-            if x1 == x2:
+            #if x1 == x2:
+            if -(boundary * 0.4) < x1 - x2 < boundary * 0.4:
                 logging.info('skipping vertical line segment (slope=inf): %s' % line_segment)
                 continue
             fit = np.polyfit((x1, x2), (y1, y2), 1)
