@@ -9,6 +9,7 @@ def canny(frame):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     blur = cv2.GaussianBlur(gray, (5, 5), 0)
     canny = cv2.Canny(blur, 100, 200)
+
     return canny
 
 def region_of_interest(canny):
@@ -95,7 +96,6 @@ def make_points(frame, line):
     # bound the coordinates within the frame
     x1 = max(-width, min(2 * width, int((y1 - intercept) / slope)))
     x2 = max(-width, min(2 * width, int((y2 - intercept) / slope)))
-    print(x1, y1, x2, y2)
     return [[x1, y1, x2, y2]]
 
 
