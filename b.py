@@ -1,5 +1,4 @@
 import cv2
-from smbus import SMBus
 import numpy as np
 import logging
 import math
@@ -8,12 +7,11 @@ import sys
 from picamera.array import PiRGBArray
 from picamera import PiCamera
 import time
-
-
+import RPi.GPIO as GPIO
+import time
 
 
 _SHOW_IMAGE = False
-
 
 class HandCodedLaneFollower(object):
 
@@ -48,9 +46,6 @@ class HandCodedLaneFollower(object):
         return curr_heading_image
 
 
-############################
-# Frame processing steps
-############################
 def detect_lane(frame):
     logging.debug('detecting lane lines...')
 
@@ -70,29 +65,19 @@ def detect_lane(frame):
 
     return lane_lines, lane_lines_image
 
-
+#detects edges
 def detect_edges(frame):
-    # filter for blue lane lines
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    show_image("hsv", hsv)
-    lower_blue = np.array([30, 40, 0])
-    upper_blue = np.array([150, 255, 255])
-    mask = cv2.inRange(hsv, lower_blue, upper_blue)
-    show_image("blue mask", mask)
-
-    # detect edges
-    edges = cv2.Canny(mask, 200, 400)
-
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    edges = cv2.Canny(blur, 100, 200)
     return edges
 
 
-
-
+# only focus bottom half of the screen
 def region_of_interest(canny):
     height, width = canny.shape
     mask = np.zeros_like(canny)
 
-    # only focus bottom half of the screen
 
     polygon = np.array([[
         (0, height * 1 / 2),
@@ -106,14 +91,12 @@ def region_of_interest(canny):
     masked_image = cv2.bitwise_and(canny, mask)
     return masked_image
 
-
+#detects lines
 def detect_line_segments(cropped_edges):
-    # tuning min_threshold, minLineLength, maxLineGap is a trial and error process by hand
-    rho = 1  # precision in pixel, i.e. 1 pixel
-    angle = np.pi / 180  # degree in radian, i.e. 1 degree
-    min_threshold = 10  # minimal of votes
-    line_segments = cv2.HoughLinesP(cropped_edges, rho, angle, min_threshold, np.array([]), minLineLength=8,
-                                    maxLineGap=4)
+    rho = 1
+    angle = np.pi / 180
+    min_threshold = 10
+    line_segments = cv2.HoughLinesP(cropped_edges, rho, angle, min_threshold, np.array([]), minLineLength=8, maxLineGap=4)
 
     if line_segments is not None:
         for line_segment in line_segments:
@@ -122,13 +105,8 @@ def detect_line_segments(cropped_edges):
 
     return line_segments
 
-
+#combines lines
 def average_slope_intercept(frame, line_segments):
-    """
-    This function combines line segments into one or two lane lines
-    If all line slopes are < 0: then we only have detected left lane
-    If all line slopes are > 0: then we only have detected right lane
-    """
     lane_lines = []
     if line_segments is None:
         logging.info('No line_segment segments detected')
@@ -139,8 +117,8 @@ def average_slope_intercept(frame, line_segments):
     right_fit = []
 
     boundary = 1/3
-    left_region_boundary = width * (1 - boundary)  # left lane line segment should be on left 2/3 of the screen
-    right_region_boundary = width * boundary # right lane line segment should be on left 2/3 of the screen
+    left_region_boundary = width * (1 - boundary) 
+    right_region_boundary = width * boundary 
 
     for line_segment in line_segments:
         for x1, y1, x2, y2 in line_segment:
@@ -166,13 +144,11 @@ def average_slope_intercept(frame, line_segments):
         lane_lines.append(make_points(frame, right_fit_average))
 
     logging.debug('lane lines: %s' % lane_lines)  # [[[316, 720, 484, 432]], [[1009, 720, 718, 432]]]
+
     return lane_lines
 
-
+#Find the steering angle
 def compute_steering_angle(frame, lane_lines):
-    """ Find the steering angle based on lane line coordinate
-        We assume that camera is calibrated to point to dead center
-    """
     if len(lane_lines) == 0:
         logging.info('No lane lines detected, do nothing')
         return -90
@@ -223,7 +199,6 @@ def stabilize_steering_angle(curr_steering_angle, new_steering_angle, num_of_lan
     return stabilized_steering_angle
 
 
-
 def display_lines(frame, lines, line_color=(0, 255, 0), line_width=10):
     line_image = np.zeros_like(frame)
     if lines is not None:
@@ -254,6 +229,7 @@ def display_heading_line(frame, steering_angle, line_color=(0, 0, 255), line_wid
 
     cv2.line(heading_image, (x1, y1), (x2, y2), line_color, line_width)
     heading_image = cv2.addWeighted(frame, 0.8, heading_image, 1, 1)
+
     return heading_image
 
 
@@ -279,26 +255,67 @@ def make_points(frame, line):
     return [[x1, y1, x2, y2]]
 
 
+# Suppress GPIO warnings
+GPIO.setwarnings(False)
+
+# Set GPIO mode
+GPIO.setmode(GPIO.BCM)
+
+# Define servo pin
+servoPIN = 17
+
+# Initialize PWM object
+GPIO.setup(servoPIN, GPIO.OUT)
+p = GPIO.PWM(servoPIN, 50)  # GPIO 17 for PWM with 50Hz
+p.start(2.5)  # Initialization
+
+# Initialize camera
 camera = PiCamera()
 camera.resolution = (640, 480)
 camera.framerate = 32
 rawCapture = PiRGBArray(camera, size=(640, 480))
 time.sleep(0.1)
 
-for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
-    frame = frame.array  
-    lane_follower = HandCodedLaneFollower()
+# Lane follower object
+follower = HandCodedLaneFollower()
 
-    video_type = cv2.VideoWriter_fourcc(*'XVID')
-    video_overlay = cv2.VideoWriter("%s_overlay.avi" % (frame), video_type, 20.0, (320, 240))
-    combo_image= lane_follower.follow_lane(frame)
-    video_overlay.write(combo_image)
-    cv2.imshow("Road with Lane line", combo_image)
+# Main loop
+for frame in camera.capture_continuous(rawCapture, format="bgr", use_video_port=True):
+    image = frame.array
+
+    # Lane following logic
+    output_frame = follower.follow_lane(image)
+
+    # Display the processed frame
+    cv2.imshow("Lane Following", output_frame)
+
+    # Servo control
+    p.ChangeDutyCycle(5)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(7.5)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(10)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(12.5)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(10)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(7.5)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(5)
+    time.sleep(0.5)
+    p.ChangeDutyCycle(2.5)
+    time.sleep(0.5)
+
+    # Check for key press
     key = cv2.waitKey(1) & 0xFF
-    rawCapture.truncate(0)
-    
     if key == ord("q"):
         break
-    cv2.destroyAllWindows()
-    
 
+    # Clear the stream for the next frame
+    rawCapture.truncate(0)
+
+# Clean up GPIO
+p.stop()
+GPIO.cleanup()
+cv2.destroyAllWindows()
